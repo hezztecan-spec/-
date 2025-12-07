@@ -202,6 +202,95 @@
             color: white;
             margin-top: 10px;
         }
+        
+        .gyro-display {
+            background: rgba(255,255,255,0.15);
+            padding: 12px;
+            border-radius: 12px;
+            margin-top: 10px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .gyro-label {
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            color: #FFD700;
+        }
+        
+        .gyro-value {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .gyro-value:last-child {
+            border-bottom: none;
+        }
+        
+        .gyro-axis {
+            font-size: 13px;
+            color: #B0BEC5;
+        }
+        
+        .gyro-num {
+            font-size: 14px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        
+        .phone-gyro {
+            background: rgba(255,255,255,0.15);
+            padding: 12px;
+            border-radius: 12px;
+            margin-top: 10px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .phone-gyro-label {
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            color: #FF6B9D;
+        }
+        
+        .phone-gyro-value {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .phone-gyro-value:last-child {
+            border-bottom: none;
+        }
+        
+        .phone-gyro-axis {
+            font-size: 13px;
+            color: #B0BEC5;
+        }
+        
+        .phone-gyro-num {
+            font-size: 14px;
+            font-weight: bold;
+            color: #FF6B9D;
+        }
+        
+        .btn-phone-gyro {
+            width: 100%;
+            padding: 10px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            background: linear-gradient(135deg, #FF6B9D 0%, #FF1493 100%);
+            color: white;
+            margin-top: 8px;
+        }
     </style>
 </head>
 <body>
@@ -209,6 +298,7 @@
         <h1>Robot Arm Controller</h1>
         <div id="status" class="status">Not Connected</div>
         <button id="btnConnect" class="btn-connect">Connect to ESP32</button>
+        <button id="btnPhoneGyro" class="btn-phone-gyro">📱 Enable Phone Gyroscope</button>
     </div>
     
     <div class="control-mode">
@@ -284,11 +374,46 @@
         <button class="btn-reset" onclick="resetPosition()">Reset All</button>
     </div>
 
+    <!-- Gyroscope Display -->
+    <div class="gyro-display">
+        <div class="gyro-label">📊 ESP32 Gyroscope Sensor</div>
+        <div class="gyro-value">
+            <span class="gyro-axis">Rotation X (Pitch):</span>
+            <span class="gyro-num" id="gyroX">0</span>
+        </div>
+        <div class="gyro-value">
+            <span class="gyro-axis">Rotation Y (Roll):</span>
+            <span class="gyro-num" id="gyroY">0</span>
+        </div>
+        <div class="gyro-value">
+            <span class="gyro-axis">Rotation Z (Yaw):</span>
+            <span class="gyro-num" id="gyroZ">0</span>
+        </div>
+    </div>
+
+    <!-- Phone Gyroscope Display -->
+    <div class="phone-gyro">
+        <div class="phone-gyro-label">📱 Phone Gyroscope Sensor</div>
+        <div class="phone-gyro-value">
+            <span class="phone-gyro-axis">Tilt X (Alpha):</span>
+            <span class="phone-gyro-num" id="phoneAlpha">0°</span>
+        </div>
+        <div class="phone-gyro-value">
+            <span class="phone-gyro-axis">Tilt Y (Beta):</span>
+            <span class="phone-gyro-num" id="phoneBeta">0°</span>
+        </div>
+        <div class="phone-gyro-value">
+            <span class="phone-gyro-axis">Tilt Z (Gamma):</span>
+            <span class="phone-gyro-num" id="phoneGamma">0°</span>
+        </div>
+    </div>
+
     <script>
         const SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb';
         const CHARACTERISTIC_UUID = '0000ffe1-0000-1000-8000-00805f9b34fb';
+        const GYRO_CHARACTERISTIC_UUID = '0000ffe2-0000-1000-8000-00805f9b34fb';
         
-        let bluetoothDevice, characteristic, isConnected = false;
+        let bluetoothDevice, characteristic, gyroCharacteristic, isConnected = false;
         let angles = { base: 90, shoulder: 90, elbow: 90, gripper: 90 };
         
         // Connect
@@ -305,6 +430,15 @@
                 const service = await server.getPrimaryService(SERVICE_UUID);
                 characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
                 
+                // Get gyro characteristic
+                try {
+                    gyroCharacteristic = await service.getCharacteristic(GYRO_CHARACTERISTIC_UUID);
+                    gyroCharacteristic.startNotifications();
+                    gyroCharacteristic.addEventListener('characteristicvaluechanged', handleGyroData);
+                } catch (e) {
+                    console.log('Gyro not available:', e);
+                }
+                
                 isConnected = true;
                 document.getElementById('status').textContent = 'Connected!';
                 document.getElementById('status').classList.add('connected');
@@ -316,6 +450,26 @@
                 document.getElementById('status').textContent = 'Error: ' + error.message;
             }
         });
+        
+        // Handle gyro data
+        function handleGyroData(event) {
+            const value = event.target.value;
+            const decoder = new TextDecoder();
+            const data = decoder.decode(value);
+            
+            // Parse: "GX:123,GY:456,GZ:789"
+            const parts = data.split(',');
+            if (parts.length >= 3) {
+                const gx = parseInt(parts[0].split(':')[1]) || 0;
+                const gy = parseInt(parts[1].split(':')[1]) || 0;
+                const gz = parseInt(parts[2].split(':')[1]) || 0;
+                
+                // Нормализовать для удобства (разделить на 100)
+                document.getElementById('gyroX').textContent = (gx / 100).toFixed(1) + ' °/s';
+                document.getElementById('gyroY').textContent = (gy / 100).toFixed(1) + ' °/s';
+                document.getElementById('gyroZ').textContent = (gz / 100).toFixed(1) + ' °/s';
+            }
+        }
         
         // Send command
         function sendCommand() {
@@ -438,6 +592,62 @@
         if (!navigator.bluetooth) {
             document.getElementById('status').textContent = 'Web Bluetooth not supported';
             document.getElementById('btnConnect').disabled = true;
+        }
+        
+        // Phone Gyroscope Support
+        let phoneGyroEnabled = false;
+        
+        document.getElementById('btnPhoneGyro').addEventListener('click', () => {
+            if (!phoneGyroEnabled) {
+                // Request permission for motion sensors (iOS 13+)
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    DeviceOrientationEvent.requestPermission()
+                        .then(permissionState => {
+                            if (permissionState === 'granted') {
+                                enablePhoneGyroscope();
+                            }
+                        })
+                        .catch(console.error);
+                } else {
+                    // Non-iOS or older iOS
+                    enablePhoneGyroscope();
+                }
+            } else {
+                disablePhoneGyroscope();
+            }
+        });
+        
+        function enablePhoneGyroscope() {
+            phoneGyroEnabled = true;
+            document.getElementById('btnPhoneGyro').textContent = '📱 Disable Phone Gyroscope';
+            document.getElementById('btnPhoneGyro').style.background = 'linear-gradient(135deg, #FF1493 0%, #FF6B9D 100%)';
+            
+            window.addEventListener('deviceorientation', handlePhoneOrientation);
+        }
+        
+        function disablePhoneGyroscope() {
+            phoneGyroEnabled = false;
+            document.getElementById('btnPhoneGyro').textContent = '📱 Enable Phone Gyroscope';
+            document.getElementById('btnPhoneGyro').style.background = 'linear-gradient(135deg, #FF6B9D 0%, #FF1493 100%)';
+            
+            window.removeEventListener('deviceorientation', handlePhoneOrientation);
+        }
+        
+        function handlePhoneOrientation(event) {
+            // Alpha: Z axis rotation (0-360) - Yaw
+            // Beta: X axis rotation (-180 to 180) - Pitch
+            // Gamma: Y axis rotation (-90 to 90) - Roll
+            
+            const alpha = Math.round(event.alpha) || 0;  // Z
+            const beta = Math.round(event.beta) || 0;    // X
+            const gamma = Math.round(event.gamma) || 0;  // Y
+            
+            document.getElementById('phoneAlpha').textContent = alpha + '°';
+            document.getElementById('phoneBeta').textContent = beta + '°';
+            document.getElementById('phoneGamma').textContent = gamma + '°';
+            
+            // Опционально: контролировать сервомоторы по телефону
+            // Распозволить пользователю выбрать режим контроля
         }
     </script>
 </body>
